@@ -17,7 +17,8 @@ let testConfig = {
     channelName: 'TEST',
     audienceType: 'interactive', // interactive|broadcast
     testDuration: 60,
-    audienceJoinInterval: 0 // seconds; 0 or empty = immediate joins (current behavior)
+    audienceJoinInterval: 0, // seconds; 0 or empty = immediate joins (current behavior)
+    geoRegions: [] // array of area codes to round-robin for audiences
 };
 
 // Utility: sleep for given milliseconds
@@ -55,6 +56,8 @@ function setupButtonHandlers() {
     document.getElementById('testDuration').onchange = updateConfig;
     const intervalEl = document.getElementById('audienceJoinInterval');
     if (intervalEl) intervalEl.onchange = updateConfig;
+    const geoRegionsEl = document.getElementById('geoRegions');
+    if (geoRegionsEl) geoRegionsEl.onchange = updateConfig;
 }
 
 // Update configuration from form
@@ -68,6 +71,12 @@ function updateConfig() {
     const intervalVal = document.getElementById('audienceJoinInterval')?.value;
     const parsedInterval = intervalVal === '' || intervalVal == null ? 0 : parseFloat(intervalVal);
     testConfig.audienceJoinInterval = isNaN(parsedInterval) ? 0 : Math.max(0, parsedInterval);
+    const geoRegionsSelect = document.getElementById('geoRegions');
+    if (geoRegionsSelect) {
+        const selected = Array.from(geoRegionsSelect.selectedOptions).map(o => o.value);
+        // Filter out empty selections
+        testConfig.geoRegions = selected.filter(Boolean);
+    }
 }
 
 // Start the test
@@ -117,6 +126,7 @@ async function createAndJoinClientsLive() {
     const channel = testConfig.channelName;
     const latencyLevel = testConfig.audienceType === 'interactive' ? 1 : 2;
     const audienceIntervalMs = (testConfig.audienceJoinInterval || 0) * 1000;
+    let audienceRegionIndex = 0;
 
     // Create hosts
     for (let i = 0; i < (testConfig.hostsCount || 0); i++) {
@@ -126,11 +136,38 @@ async function createAndJoinClientsLive() {
 
     // Create audiences
     for (let i = 0; i < (testConfig.audiencesCount || 0); i++) {
+        // Set geofence region for this audience if configured
+        const regions = Array.isArray(testConfig.geoRegions) ? testConfig.geoRegions : [];
+        if (regions.length > 0) {
+            const region = regions[audienceRegionIndex % regions.length];
+            try {
+                if (region && region !== 'GLOBAL') {
+                    AgoraRTC.setArea({ areaCode: region });
+                    log(`Audience ${i}: Set geofence region to ${region}`);
+                } else {
+                    // Reset to global/default
+                    AgoraRTC.setArea({ areaCode: 'GLOBAL' });
+                    log(`Audience ${i}: Set geofence region to GLOBAL`);
+                }
+            } catch (e) {
+                log(`Audience ${i}: Failed to set region (${region}): ${e.message}`);
+            }
+            audienceRegionIndex++;
+        }
+
         const clientInfo = await createAudienceClient(i, channel, latencyLevel);
         testState.clients.push(clientInfo);
         if (audienceIntervalMs > 0 && i < (testConfig.audiencesCount - 1)) {
             await sleep(audienceIntervalMs);
         }
+    }
+
+    // After creating audiences, reset geofence to GLOBAL so future operations aren't pinned
+    try {
+        AgoraRTC.setArea({ areaCode: 'GLOBAL' });
+        log('Geofence reset to GLOBAL after audience creation');
+    } catch (e) {
+        log(`Failed to reset geofence to GLOBAL: ${e.message}`);
     }
 
     log(`Created ${testState.clients.length} clients`);
@@ -282,6 +319,14 @@ async function stopTest() {
     updateUI();
     updateStatus('Test Stopped', 'stopped');
     log('Test stopped successfully');
+
+    // Ensure geofence is reset to global after test stops
+    try {
+        AgoraRTC.setArea({ areaCode: 'GLOBAL' });
+        log('Geofence reset to GLOBAL');
+    } catch (e) {
+        log(`Failed to reset geofence to GLOBAL: ${e.message}`);
+    }
 }
 
 // Update UI state

@@ -144,6 +144,26 @@
                 <input type="number" id="testDuration" value="60" min="10" max="3600">
             </div>
             
+            <div class="form-group">
+                <label for="geoRegions">Geofence Regions (round robin for audiences):</label>
+                <select id="geoRegions" multiple size="6">
+                    <option value="GLOBAL">Global</option>
+                    <option value="AFRICA">Africa</option>
+                    <option value="ASIA">Asia</option>
+                    <option value="CHINA">China</option>
+                    <option value="EUROPE">Europe</option>
+                    <option value="HKMC">Hong Kong & Macau</option>
+                    <option value="INDIA">India</option>
+                    <option value="JAPAN">Japan</option>
+                    <option value="NORTH_AMERICA">North America</option>
+                    <option value="OCEANIA">Oceania</option>
+                    <option value="OVERSEA">Oversea</option>
+                    <option value="SOUTH_AMERICA">South America</option>
+                    <option value="US">United States</option>
+                </select>
+                <small>Select one or more; audiences will rotate across selections.</small>
+            </div>
+            
             
         </div>
         
