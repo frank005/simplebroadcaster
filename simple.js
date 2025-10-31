@@ -18,7 +18,8 @@ let testConfig = {
     audienceType: 'interactive', // interactive|broadcast
     testDuration: 60,
     audienceJoinInterval: 0, // seconds; 0 or empty = immediate joins (current behavior)
-    geoRegions: [] // array of area codes to round-robin for audiences
+    geoRegions: [], // array of area codes to round-robin for audiences
+    useStringUid: false // if true, use string UID "string" instead of null (auto-assigned integers)
 };
 
 // Utility: sleep for given milliseconds
@@ -58,6 +59,8 @@ function setupButtonHandlers() {
     if (intervalEl) intervalEl.onchange = updateConfig;
     const geoRegionsEl = document.getElementById('geoRegions');
     if (geoRegionsEl) geoRegionsEl.onchange = updateConfig;
+    const useStringUidEl = document.getElementById('useStringUid');
+    if (useStringUidEl) useStringUidEl.onchange = updateConfig;
 }
 
 // Update configuration from form
@@ -76,6 +79,10 @@ function updateConfig() {
         const selected = Array.from(geoRegionsSelect.selectedOptions).map(o => o.value);
         // Filter out empty selections
         testConfig.geoRegions = selected.filter(Boolean);
+    }
+    const useStringUidEl = document.getElementById('useStringUid');
+    if (useStringUidEl) {
+        testConfig.useStringUid = useStringUidEl.checked;
     }
 }
 
@@ -178,7 +185,9 @@ async function createHostClient(index, channelName) {
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
     setupClientEventListeners(client, `host-${index}`);
     try {
-        const uid = null; // let Agora assign
+        // Use string UID "string" with index suffix if enabled, otherwise null (auto-assigned integer)
+        // Each client needs a unique UID, so we append the index
+        const uid = testConfig.useStringUid ? `string-${index}` : null;
         await client.join(testConfig.appId, channelName, null, uid);
         await client.setClientRole('host');
         const audioTrack = await createSynthAudioTrack();
@@ -196,7 +205,10 @@ async function createAudienceClient(index, channelName, latencyLevel) {
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
     setupClientEventListeners(client, `aud-${index}`);
     try {
-        const uid = null;
+        // Use string UID "string" with index suffix if enabled, otherwise null (auto-assigned integer)
+        // Each client needs a unique UID, so we append the index. Hosts use their index, audiences use hostsCount + index
+        const hostsCount = testConfig.hostsCount || 0;
+        const uid = testConfig.useStringUid ? `string-${hostsCount + index}` : null;
         await client.join(testConfig.appId, channelName, null, uid);
         await client.setClientRole('audience', { level: latencyLevel });
         log(`Audience ${client.uid} joined channel ${channelName} (latency level ${latencyLevel})`);
@@ -231,6 +243,9 @@ function setupClientEventListeners(client, index) {
 
             if (mediaType === "audio") {
                 user.audioTrack.play();
+            } else if (mediaType === "video") {
+                // Video subscription successful, but we don't display it in a player
+                log(`Client ${index}: Video track subscribed but not displayed`);
             }
         } catch (error) {
             log(`Client ${index}: Error subscribing to user ${user.uid}: ${error.message}`);
@@ -258,17 +273,32 @@ function setupClientEventListeners(client, index) {
 
 // Start the test timer
 function startTimer() {
+    const timerElement = document.getElementById('timer');
+    const timeRemainingElement = document.getElementById('timeRemaining');
+    
+    if (!timerElement || !timeRemainingElement) {
+        log('Warning: Timer elements not found in DOM');
+        return;
+    }
+    
+    // Initialize the display with the current time remaining
+    timeRemainingElement.textContent = testState.timeRemaining;
+    // Make sure timer is visible
+    timerElement.style.display = 'block';
+    timerElement.style.visibility = 'visible';
+    timerElement.style.opacity = '1';
+    timerElement.removeAttribute('hidden');
+    log(`Timer started: ${testState.timeRemaining} seconds remaining`);
+    
     testState.testTimer = setInterval(() => {
         testState.timeRemaining--;
-        document.getElementById('timeRemaining').textContent = testState.timeRemaining;
+        timeRemainingElement.textContent = testState.timeRemaining;
         
         if (testState.timeRemaining <= 0) {
             log('Test duration completed, stopping test...');
             stopTest();
         }
     }, 1000);
-    
-    document.getElementById('timer').style.display = 'block';
 }
 
 // Stop the test
@@ -286,7 +316,10 @@ async function stopTest() {
         testState.testTimer = null;
     }
     
-    document.getElementById('timer').style.display = 'none';
+    const timerElement = document.getElementById('timer');
+    if (timerElement) {
+        timerElement.style.display = 'none';
+    }
     
     // Leave all channels
     for (let i = 0; i < testState.clients.length; i++) {

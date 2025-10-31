@@ -96,6 +96,9 @@
             font-size: 18px;
             font-weight: bold;
             color: #007bff;
+            margin: 10px 0;
+            padding: 10px;
+            display: none; /* Hidden by default, shown when timer starts */
         }
     </style>
 </head>
@@ -164,6 +167,13 @@
                 <small>Select one or more; audiences will rotate across selections.</small>
             </div>
             
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="useStringUid" style="width: auto; margin-right: 8px;">
+                    Use string UID (sends string-int++ instead of auto-assigned integers)
+                </label>
+            </div>
+            
             
         </div>
         
@@ -177,7 +187,7 @@
         <div class="form-section">
             <h3>Test Status</h3>
             <div id="testStatus" class="status stopped">Test Stopped</div>
-            <div id="timer" class="timer" style="display: none;">Time Remaining: <span id="timeRemaining">0</span>s</div>
+            <div id="timer" class="timer">Time Remaining: <span id="timeRemaining">0</span>s</div>
         </div>
         
         <div class="form-section">
