@@ -14,7 +14,7 @@ let testConfig = {
     appId: '',
     hostsCount: 1,
     audiencesCount: 5,
-    channelName: 'TEST',
+    channelName: 'simplebroadcast',
     audienceType: 'interactive', // interactive|broadcast
     testDuration: 60,
     audienceJoinInterval: 0, // seconds; 0 or empty = immediate joins (current behavior)
