@@ -1,12 +1,41 @@
 // Web SDK Testing Client
 AgoraRTC.setParameter("SHOW_GLOBAL_CLIENT_LIST", true);
 
+let pcCounter = 0;
+
+(function () {
+    const Orig = window.RTCPeerConnection;
+  
+    window.RTCPeerConnection = function (...args) {
+      const pc = new Orig(...args);
+  
+      // Fire your custom hook
+      window.dispatchEvent(new CustomEvent("peer-connection-created", {
+        detail: { pc, args }
+      }));
+  
+      return pc;
+    };
+  
+    window.RTCPeerConnection.prototype = Orig.prototype;
+    window.RTCPeerConnection.prototype.constructor = window.RTCPeerConnection;
+  })();
+
+  window.addEventListener("peer-connection-created", (ev) => {
+    pcCounter++;
+    console.log("PC created:", pcCounter);
+    log(`PC created: ${pcCounter}`);
+    updatePCCounterDisplay();
+  });
+
 // Global state management
 let testState = {
     isRunning: false,
     clients: [],
     testTimer: null,
-    timeRemaining: 0
+    timeRemaining: 0,
+    intersectionObserver: null,
+    audienceCells: []
 };
 
 // Test configuration
@@ -19,7 +48,8 @@ let testConfig = {
     testDuration: 60,
     audienceJoinInterval: 0, // seconds; 0 or empty = immediate joins (current behavior)
     geoRegions: [], // array of area codes to round-robin for audiences
-    useStringUid: false // if true, use string UID "string" instead of null (auto-assigned integers)
+    useStringUid: false, // if true, use string UID "string" instead of null (auto-assigned integers)
+    publishCamera: false // if true, publish camera instead of fake audio track
 };
 
 // Utility: sleep for given milliseconds
@@ -61,6 +91,8 @@ function setupButtonHandlers() {
     if (geoRegionsEl) geoRegionsEl.onchange = updateConfig;
     const useStringUidEl = document.getElementById('useStringUid');
     if (useStringUidEl) useStringUidEl.onchange = updateConfig;
+    const publishCameraEl = document.getElementById('publishCamera');
+    if (publishCameraEl) publishCameraEl.onchange = handlePublishCameraChange;
 }
 
 // Update configuration from form
@@ -84,6 +116,28 @@ function updateConfig() {
     if (useStringUidEl) {
         testConfig.useStringUid = useStringUidEl.checked;
     }
+    const publishCameraEl = document.getElementById('publishCamera');
+    if (publishCameraEl) {
+        testConfig.publishCamera = publishCameraEl.checked;
+    }
+}
+
+// Handle publish camera checkbox change
+function handlePublishCameraChange() {
+    const publishCameraEl = document.getElementById('publishCamera');
+    const hostsCountEl = document.getElementById('hostsCount');
+    
+    if (publishCameraEl.checked) {
+        // Set hosts to 1 and disable the input
+        hostsCountEl.value = 1;
+        hostsCountEl.disabled = true;
+    } else {
+        // Re-enable the input
+        hostsCountEl.disabled = false;
+    }
+    
+    // Update config
+    updateConfig();
 }
 
 // Start the test
@@ -113,8 +167,16 @@ async function startTest() {
         if (totalRequested <= 0) {
             throw new Error('Please configure at least 1 client (host or audience)');
         }
+        
         // Create and join clients for live broadcasting
         await createAndJoinClientsLive();
+        
+        // Create the audience table UI only if publishing camera (after clients are created)
+        if (testConfig.publishCamera) {
+            createAudienceTable();
+            // Trigger initial visibility check for cells that are already visible
+            triggerInitialVisibilityCheck();
+        }
         
         // Start timer
         startTimer();
@@ -180,7 +242,7 @@ async function createAndJoinClientsLive() {
     log(`Created ${testState.clients.length} clients`);
 }
 
-// Create a host client in live mode and publish a synthesized audio track
+// Create a host client in live mode and publish a track (camera or fake audio)
 async function createHostClient(index, channelName) {
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
     setupClientEventListeners(client, `host-${index}`);
@@ -190,10 +252,32 @@ async function createHostClient(index, channelName) {
         const uid = testConfig.useStringUid ? `string-${index}` : null;
         await client.join(testConfig.appId, channelName, null, uid);
         await client.setClientRole('host');
-        const audioTrack = await createSynthAudioTrack();
-        await client.publish([audioTrack]);
-        log(`Host ${client.uid} joined channel ${channelName} and published audio`);
-        return { client, index: `host-${index}`, uid: client.uid, channelName, localTracks: [audioTrack] };
+        
+        let tracksToPublish = [];
+        
+        if (testConfig.publishCamera) {
+            // Create and publish camera video track
+            const videoTrack = await AgoraRTC.createCameraVideoTrack();
+            tracksToPublish.push(videoTrack);
+            log(`Host ${client.uid} created camera video track`);
+        } else {
+            // Create and publish fake audio track
+            const audioTrack = await createSynthAudioTrack();
+            tracksToPublish.push(audioTrack);
+            log(`Host ${client.uid} created fake audio track`);
+        }
+        
+        await client.publish(tracksToPublish);
+        const mediaType = testConfig.publishCamera ? 'video' : 'audio';
+        log(`Host ${client.uid} joined channel ${channelName} and published ${mediaType}`);
+        
+        return { 
+            client, 
+            index: `host-${index}`, 
+            uid: client.uid, 
+            channelName, 
+            localTracks: tracksToPublish 
+        };
     } catch (error) {
         log(`Error creating host ${index}: ${error.message}`);
         throw error;
@@ -205,14 +289,34 @@ async function createAudienceClient(index, channelName, latencyLevel) {
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
     setupClientEventListeners(client, `aud-${index}`);
     try {
-        // Use string UID "string" with index suffix if enabled, otherwise null (auto-assigned integer)
-        // Each client needs a unique UID, so we append the index. Hosts use their index, audiences use hostsCount + index
         const hostsCount = testConfig.hostsCount || 0;
         const uid = testConfig.useStringUid ? `string-${hostsCount + index}` : null;
-        await client.join(testConfig.appId, channelName, null, uid);
-        await client.setClientRole('audience', { level: latencyLevel });
-        log(`Audience ${client.uid} joined channel ${channelName} (latency level ${latencyLevel})`);
-        return { client, index: `aud-${index}`, uid: client.uid, channelName };
+        
+        const clientInfo = {
+            client,
+            index: `aud-${index}`,
+            audienceIndex: index,
+            uid: null, // Will be set after join
+            channelName,
+            latencyLevel,
+            joinState: 'disconnected', // 'disconnected' | 'joining' | 'joined' | 'leaving'
+            subscribeState: 'unsubscribed', // 'unsubscribed' | 'subscribing' | 'subscribed'
+            desiredUid: uid
+        };
+        
+        // If publishCamera is NOT checked, join immediately (audio-only mode)
+        if (!testConfig.publishCamera) {
+            await client.join(testConfig.appId, channelName, null, uid);
+            await client.setClientRole('audience', { level: latencyLevel });
+            clientInfo.uid = client.uid;
+            clientInfo.joinState = 'joined';
+            log(`Audience ${client.uid} joined channel ${channelName} (latency level ${latencyLevel})`);
+        } else {
+            // If publishCamera is checked, don't join yet - visibility will control it
+            log(`Audience ${index} created but not joined (visibility-controlled)`);
+        }
+        
+        return clientInfo;
     } catch (error) {
         log(`Error creating audience ${index}: ${error.message}`);
         throw error;
@@ -238,22 +342,52 @@ async function createSynthAudioTrack() {
 function setupClientEventListeners(client, index) {
     client.on("user-published", async (user, mediaType) => {
         try {
-            await client.subscribe(user, mediaType);
-            log(`Client ${index}: Subscribed to remote user ${user.uid} ${mediaType}`);
-
-            if (mediaType === "audio") {
-                user.audioTrack.play();
-            } else if (mediaType === "video") {
-                // Video subscription successful, but we don't display it in a player
-                log(`Client ${index}: Video track subscribed but not displayed`);
+            // Find the client info to check visibility state
+            const clientInfo = testState.clients.find(c => c.client === client);
+            
+            // If this is an audience client in visibility-controlled mode (publishCamera enabled)
+            // only subscribe to video if fully visible
+            if (clientInfo && clientInfo.audienceIndex !== undefined && testConfig.publishCamera && mediaType === 'video') {
+                // Check the corresponding cell's visibility
+                const cell = testState.audienceCells[clientInfo.audienceIndex];
+                if (cell && cell.classList.contains('visible-full')) {
+                    await client.subscribe(user, mediaType);
+                    clientInfo.subscribeState = 'subscribed';
+                    log(`Client ${index}: Subscribed to remote user ${user.uid} ${mediaType} (fully visible)`);
+                    
+                    // Play the video track into the audience cell
+                    if (user.videoTrack) {
+                        user.videoTrack.play(cell);
+                        log(`Client ${index}: Playing video in audience cell ${clientInfo.audienceIndex}`);
+                    }
+                } else {
+                    log(`Client ${index}: Skipping subscription to ${mediaType} (not fully visible)`);
+                    return;
+                }
+            } else {
+                // For hosts or audio-only mode, subscribe normally
+                await client.subscribe(user, mediaType);
+                if (clientInfo) {
+                    clientInfo.subscribeState = 'subscribed';
+                }
+                log(`Client ${index}: Subscribed to remote user ${user.uid} ${mediaType}`);
+                
+                // Handle playback for non-visibility-controlled clients
+                if (mediaType === "audio") {
+                    user.audioTrack.play();
+                }
             }
         } catch (error) {
             log(`Client ${index}: Error subscribing to user ${user.uid}: ${error.message}`);
         }
     });
     
-    client.on("user-unpublished", (user) => {
-        log(`Client ${index}: Remote user ${user.uid} unpublished`);
+    client.on("user-unpublished", (user, mediaType) => {
+        log(`Client ${index}: Remote user ${user.uid} unpublished ${mediaType || 'track'}`);
+        const clientInfo = testState.clients.find(c => c.client === client);
+        if (clientInfo && mediaType === 'video') {
+            clientInfo.subscribeState = 'unsubscribed';
+        }
     });
     
     client.on("connection-state-change", (cur, prev, reason) => {
@@ -271,10 +405,266 @@ function setupClientEventListeners(client, index) {
 
 // For broadcasting test we are audio-only to simplify autoplay and permissions.
 
+// Create the audience table with visibility-based color coding
+function createAudienceTable() {
+    const videoContainer = document.getElementById('videoContainer');
+    videoContainer.innerHTML = '';
+    testState.audienceCells = [];
+    
+    const audienceCount = testConfig.audiencesCount || 0;
+    if (audienceCount === 0) {
+        return; // No audience clients to display
+    }
+    
+    // Create table container
+    const table = document.createElement('div');
+    table.className = 'audience-table';
+    
+    // Create cells for each audience client
+    for (let i = 0; i < audienceCount; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'audience-cell visible-none';
+        cell.textContent = `Audience ${i}`;
+        cell.dataset.index = i;
+        table.appendChild(cell);
+        testState.audienceCells.push(cell);
+    }
+    
+    videoContainer.appendChild(table);
+    
+    // Setup Intersection Observer to track visibility
+    setupVisibilityObserver();
+    
+    log(`Created audience table with ${audienceCount} cells (${Math.ceil(audienceCount / 2)} rows)`);
+}
+
+// Setup Intersection Observer to detect when cells are visible
+function setupVisibilityObserver() {
+    // Clean up existing observer if any
+    if (testState.intersectionObserver) {
+        testState.intersectionObserver.disconnect();
+    }
+    
+    const options = {
+        root: document.getElementById('videoContainer'),
+        rootMargin: '0px',
+        threshold: [0, 0.1, 0.5, 0.9, 1.0] // Multiple thresholds for granular detection
+    };
+    
+    testState.intersectionObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            const cell = entry.target;
+            const audienceIndex = parseInt(cell.dataset.index);
+            
+            // Remove all visibility classes
+            cell.classList.remove('visible-full', 'visible-partial', 'visible-none');
+            
+            // Determine visibility state and update client accordingly
+            if (entry.intersectionRatio >= 1.0) {
+                // Fully visible - should be joined AND subscribed
+                cell.classList.add('visible-full');
+                handleAudienceVisibilityChange(audienceIndex, 'full');
+            } else if (entry.intersectionRatio > 0) {
+                // Partially visible - should be joined but not subscribed
+                cell.classList.add('visible-partial');
+                handleAudienceVisibilityChange(audienceIndex, 'partial');
+            } else {
+                // Not visible - should be disconnected
+                cell.classList.add('visible-none');
+                handleAudienceVisibilityChange(audienceIndex, 'none');
+            }
+        });
+    }, options);
+    
+    // Observe all audience cells
+    testState.audienceCells.forEach(cell => {
+        testState.intersectionObserver.observe(cell);
+    });
+}
+
+// Trigger initial visibility check for all cells
+function triggerInitialVisibilityCheck() {
+    // Give the DOM a moment to settle, then manually check visibility for all cells
+    setTimeout(() => {
+        const container = document.getElementById('videoContainer');
+        if (!container) return;
+        
+        testState.audienceCells.forEach((cell, index) => {
+            const rect = cell.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            
+            // Calculate intersection ratio manually
+            const cellTop = rect.top;
+            const cellBottom = rect.bottom;
+            const containerTop = containerRect.top;
+            const containerBottom = containerRect.bottom;
+            
+            if (cellBottom <= containerTop || cellTop >= containerBottom) {
+                // Not visible
+                cell.classList.remove('visible-full', 'visible-partial');
+                cell.classList.add('visible-none');
+            } else if (cellTop >= containerTop && cellBottom <= containerBottom) {
+                // Fully visible
+                cell.classList.remove('visible-partial', 'visible-none');
+                cell.classList.add('visible-full');
+                handleAudienceVisibilityChange(index, 'full');
+            } else {
+                // Partially visible
+                cell.classList.remove('visible-full', 'visible-none');
+                cell.classList.add('visible-partial');
+                handleAudienceVisibilityChange(index, 'partial');
+            }
+        });
+        
+        log('Initial visibility check completed');
+    }, 100);
+}
+
+// Handle audience client state changes based on visibility
+async function handleAudienceVisibilityChange(audienceIndex, visibility) {
+    // Find the client info for this audience
+    const clientInfo = testState.clients.find(c => c.audienceIndex === audienceIndex);
+    if (!clientInfo) {
+        return; // Client not found
+    }
+    
+    try {
+        if (visibility === 'full') {
+            // Fully visible - ensure joined and subscribed
+            await ensureAudienceJoined(clientInfo);
+            await ensureAudienceSubscribed(clientInfo);
+        } else if (visibility === 'partial') {
+            // Partially visible - ensure joined but unsubscribe
+            await ensureAudienceJoined(clientInfo);
+            await ensureAudienceUnsubscribed(clientInfo);
+        } else {
+            // Not visible - ensure left the channel
+            await ensureAudienceLeft(clientInfo);
+        }
+    } catch (error) {
+        log(`Error handling visibility change for audience ${audienceIndex}: ${error.message}`);
+    }
+}
+
+// Ensure an audience client has joined the channel
+async function ensureAudienceJoined(clientInfo) {
+    if (clientInfo.joinState === 'joined' || clientInfo.joinState === 'joining') {
+        return; // Already joined or joining
+    }
+    
+    try {
+        clientInfo.joinState = 'joining';
+        await clientInfo.client.join(
+            testConfig.appId,
+            clientInfo.channelName,
+            null,
+            clientInfo.desiredUid,
+            { autoSubscribe: true }
+        );
+        await clientInfo.client.setClientRole('audience', { level: clientInfo.latencyLevel });
+        clientInfo.uid = clientInfo.client.uid;
+        clientInfo.joinState = 'joined';
+        log(`Audience ${clientInfo.audienceIndex} (UID: ${clientInfo.uid}) joined channel`);
+    } catch (error) {
+        clientInfo.joinState = 'disconnected';
+        log(`Error joining audience ${clientInfo.audienceIndex}: ${error.message}`);
+        throw error;
+    }
+}
+
+// Ensure an audience client has left the channel
+async function ensureAudienceLeft(clientInfo) {
+    if (clientInfo.joinState === 'disconnected' || clientInfo.joinState === 'leaving') {
+        return; // Already disconnected or leaving
+    }
+    
+    try {
+        clientInfo.joinState = 'leaving';
+        await clientInfo.client.leave();
+        clientInfo.joinState = 'disconnected';
+        clientInfo.subscribeState = 'unsubscribed';
+        log(`Audience ${clientInfo.audienceIndex} left channel`);
+    } catch (error) {
+        clientInfo.joinState = 'disconnected';
+        log(`Error leaving audience ${clientInfo.audienceIndex}: ${error.message}`);
+        throw error;
+    }
+}
+
+// Ensure an audience client is subscribed to remote video tracks
+async function ensureAudienceSubscribed(clientInfo) {
+    if (clientInfo.subscribeState === 'subscribed') {
+        return; // Already subscribed
+    }
+    
+    try {
+        // Get all remote users
+        const remoteUsers = clientInfo.client.remoteUsers;
+        for (const user of remoteUsers) {
+            if (user.hasVideo) {
+                // Subscribe if not already subscribed
+                if (!user.videoTrack) {
+                    await clientInfo.client.subscribe(user, 'video');
+                }
+                
+                // Play the video track into the audience cell
+                const cell = testState.audienceCells[clientInfo.audienceIndex];
+                if (cell && user.videoTrack) {
+                    user.videoTrack.play(cell);
+                    log(`Audience ${clientInfo.audienceIndex} subscribed and playing video from user ${user.uid}`);
+                }
+            }
+        }
+        clientInfo.subscribeState = 'subscribed';
+    } catch (error) {
+        log(`Error subscribing audience ${clientInfo.audienceIndex}: ${error.message}`);
+    }
+}
+
+// Ensure an audience client is unsubscribed from remote tracks
+async function ensureAudienceUnsubscribed(clientInfo) {
+    if (clientInfo.subscribeState === 'unsubscribed') {
+        return; // Already unsubscribed
+    }
+    
+    try {
+        // Get all remote users
+        const remoteUsers = clientInfo.client.remoteUsers;
+        for (const user of remoteUsers) {
+            if (user.hasVideo && user.videoTrack) {
+                // Stop playing the video in the cell
+                user.videoTrack.stop();
+                await clientInfo.client.unsubscribe(user, 'video');
+                log(`Audience ${clientInfo.audienceIndex} unsubscribed from user ${user.uid} video`);
+            }
+        }
+        
+        // Clear the cell content to remove the video element
+        const cell = testState.audienceCells[clientInfo.audienceIndex];
+        if (cell) {
+            // Keep the text label but remove any video elements
+            cell.textContent = `Audience ${clientInfo.audienceIndex}`;
+        }
+        
+        clientInfo.subscribeState = 'unsubscribed';
+    } catch (error) {
+        log(`Error unsubscribing audience ${clientInfo.audienceIndex}: ${error.message}`);
+    }
+}
+
+// Update PC counter display
+function updatePCCounterDisplay() {
+    const pcCountElement = document.getElementById('pcCount');
+    if (pcCountElement) {
+        pcCountElement.textContent = pcCounter;
+    }
+}
+
 // Start the test timer
 function startTimer() {
     const timerElement = document.getElementById('timer');
     const timeRemainingElement = document.getElementById('timeRemaining');
+    const pcCounterElement = document.getElementById('pcCounter');
     
     if (!timerElement || !timeRemainingElement) {
         log('Warning: Timer elements not found in DOM');
@@ -288,6 +678,16 @@ function startTimer() {
     timerElement.style.visibility = 'visible';
     timerElement.style.opacity = '1';
     timerElement.removeAttribute('hidden');
+    
+    // Show and initialize PC counter
+    if (pcCounterElement) {
+        pcCounterElement.style.display = 'block';
+        pcCounterElement.style.visibility = 'visible';
+        pcCounterElement.style.opacity = '1';
+        pcCounterElement.removeAttribute('hidden');
+        updatePCCounterDisplay();
+    }
+    
     log(`Timer started: ${testState.timeRemaining} seconds remaining`);
     
     testState.testTimer = setInterval(() => {
@@ -321,33 +721,56 @@ async function stopTest() {
         timerElement.style.display = 'none';
     }
     
-    // Leave all channels
+    // Hide PC counter
+    const pcCounterElement = document.getElementById('pcCounter');
+    if (pcCounterElement) {
+        pcCounterElement.style.display = 'none';
+    }
+    
+    // Leave all channels and clean up tracks
     for (let i = 0; i < testState.clients.length; i++) {
         try {
             const clientInfo = testState.clients[i];
+            
+            // Close local tracks if they exist
+            if (clientInfo.localTracks && Array.isArray(clientInfo.localTracks)) {
+                for (const track of clientInfo.localTracks) {
+                    try {
+                        track.close();
+                        log(`Client ${i}: Closed local track`);
+                    } catch (trackError) {
+                        log(`Client ${i}: Error closing track: ${trackError.message}`);
+                    }
+                }
+            }
+            
             await clientInfo.client.leave();
             log(`Client ${i} left channel ${clientInfo.channelName}`);
+            await clientInfo.client.removeAllListeners();
+            log(`Client ${i} removed all listeners`);
         } catch (error) {
             log(`Error leaving client ${i}: ${error.message}`);
         }
     }
     
-    // Clean up local tracks
-    if (testState.localAudioTrack) {
-        testState.localAudioTrack.close();
-        testState.localAudioTrack = null;
-    }
-    if (testState.localVideoTrack) {
-        testState.localVideoTrack.close();
-        testState.localVideoTrack = null;
+    // Clean up Intersection Observer
+    if (testState.intersectionObserver) {
+        testState.intersectionObserver.disconnect();
+        testState.intersectionObserver = null;
     }
     
     // Clear video containers
     const videoContainer = document.getElementById('videoContainer');
     videoContainer.innerHTML = '';
     
+    // Clear audience cells array
+    testState.audienceCells = [];
+    
     // Clear clients array
     testState.clients = [];
+
+    //reset PeerConnection counter
+    pcCounter = 0;
     
     updateUI();
     updateStatus('Test Stopped', 'stopped');

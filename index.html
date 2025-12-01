@@ -100,6 +100,43 @@
             padding: 10px;
             display: none; /* Hidden by default, shown when timer starts */
         }
+        #videoContainer {
+            max-height: 440px; /* 2 rows * 200px + gaps + padding */
+            overflow-y: auto;
+            overflow-x: hidden;
+            border: 2px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+        }
+        .audience-table {
+            display: grid;
+            grid-template-columns: repeat(2, 200px);
+            gap: 20px;
+            justify-content: center;
+        }
+        .audience-cell {
+            width: 200px;
+            height: 200px;
+            border: 3px solid #000;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            transition: background-color 0.3s ease;
+        }
+        .audience-cell.visible-full {
+            background-color: #28a745; /* Green - fully visible */
+        }
+        .audience-cell.visible-partial {
+            background-color: #fd7e14; /* Orange - partially visible */
+        }
+        .audience-cell.visible-none {
+            background-color: #dc3545; /* Red - not visible */
+        }
     </style>
 </head>
 <body>
@@ -117,6 +154,14 @@
             <div class="form-group">
                 <label for="hostsCount">Number of Hosts:</label>
                 <input type="number" id="hostsCount" value="1" min="0">
+            </div>
+
+            <div class="form-group">
+                <h4 style="margin-top: 20px; margin-bottom: 10px;">Pub/Sub Settings</h4>
+                <label>
+                    <input type="checkbox" id="publishCamera" style="width: auto; margin-right: 8px;">
+                    Publish Camera
+                </label>
             </div>
 
             <div class="form-group">
@@ -188,6 +233,7 @@
             <h3>Test Status</h3>
             <div id="testStatus" class="status stopped">Test Stopped</div>
             <div id="timer" class="timer">Time Remaining: <span id="timeRemaining">0</span>s</div>
+            <div id="pcCounter" class="timer">PeerConnections Created: <span id="pcCount">0</span></div>
         </div>
         
         <div class="form-section">
