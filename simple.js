@@ -1,6 +1,9 @@
 // Web SDK Testing Client
 AgoraRTC.setParameter("SHOW_GLOBAL_CLIENT_LIST", true);
+AgoraRTC.setLogLevel(4);
 
+
+//overide the RTCPeerConnection to count the number of PeerConnections created
 let pcCounter = 0;
 
 (function () {
