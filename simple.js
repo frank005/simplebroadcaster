@@ -37,6 +37,7 @@ let testState = {
     clients: [],
     testTimer: null,
     timeRemaining: 0,
+    hostCycleAbort: null,
     intersectionObserver: null,
     audienceCells: []
 };
@@ -50,9 +51,16 @@ let testConfig = {
     audienceType: 'interactive', // interactive|broadcast
     testDuration: 60,
     audienceJoinInterval: 0, // seconds; 0 or empty = immediate joins (current behavior)
+    hostPublishDuration: 0, // seconds; 0 = hosts stay entire test (no cycling)
+    hostRejoinInterval: 0, // seconds; gap between leave and rejoin
+    hostStaggerOffset: 0, // seconds; each host delays start by index * offset
+    hostRandomTiming: false, // if true, randomize publish/rejoin each cycle
+    hostPublishMax: 0, // max publish duration (min = hostPublishDuration)
+    hostRejoinMax: 0, // max rejoin interval (min = hostRejoinInterval)
     geoRegions: [], // array of area codes to round-robin for audiences
     useStringUid: false, // if true, use string UID "string" instead of null (auto-assigned integers)
-    publishCamera: false // if true, publish camera instead of fake audio track
+    publishAudio: true, // if true, publish synthetic audio track
+    publishCamera: false // if true, publish camera video track
 };
 
 // Utility: sleep for given milliseconds
@@ -90,10 +98,24 @@ function setupButtonHandlers() {
     document.getElementById('testDuration').onchange = updateConfig;
     const intervalEl = document.getElementById('audienceJoinInterval');
     if (intervalEl) intervalEl.onchange = updateConfig;
+    const hostPubDurEl = document.getElementById('hostPublishDuration');
+    if (hostPubDurEl) hostPubDurEl.onchange = updateConfig;
+    const hostRejoinEl = document.getElementById('hostRejoinInterval');
+    if (hostRejoinEl) hostRejoinEl.onchange = updateConfig;
+    const hostStaggerEl = document.getElementById('hostStaggerOffset');
+    if (hostStaggerEl) hostStaggerEl.onchange = updateConfig;
+    const hostRandomEl = document.getElementById('hostRandomTiming');
+    if (hostRandomEl) hostRandomEl.onchange = handleHostRandomToggle;
+    ['hostPublishMax', 'hostRejoinMax'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.onchange = updateConfig;
+    });
     const geoRegionsEl = document.getElementById('geoRegions');
     if (geoRegionsEl) geoRegionsEl.onchange = updateConfig;
     const useStringUidEl = document.getElementById('useStringUid');
     if (useStringUidEl) useStringUidEl.onchange = updateConfig;
+    const publishAudioEl = document.getElementById('publishAudio');
+    if (publishAudioEl) publishAudioEl.onchange = updateConfig;
     const publishCameraEl = document.getElementById('publishCamera');
     if (publishCameraEl) publishCameraEl.onchange = handlePublishCameraChange;
 }
@@ -109,6 +131,24 @@ function updateConfig() {
     const intervalVal = document.getElementById('audienceJoinInterval')?.value;
     const parsedInterval = intervalVal === '' || intervalVal == null ? 0 : parseFloat(intervalVal);
     testConfig.audienceJoinInterval = isNaN(parsedInterval) ? 0 : Math.max(0, parsedInterval);
+    const hostPubDurVal = document.getElementById('hostPublishDuration')?.value;
+    const parsedPubDur = hostPubDurVal === '' || hostPubDurVal == null ? 0 : parseFloat(hostPubDurVal);
+    testConfig.hostPublishDuration = isNaN(parsedPubDur) ? 0 : Math.max(0, parsedPubDur);
+    const hostRejoinVal = document.getElementById('hostRejoinInterval')?.value;
+    const parsedRejoin = hostRejoinVal === '' || hostRejoinVal == null ? 0 : parseFloat(hostRejoinVal);
+    testConfig.hostRejoinInterval = isNaN(parsedRejoin) ? 0 : Math.max(0, parsedRejoin);
+    const staggerVal = document.getElementById('hostStaggerOffset')?.value;
+    const parsedStagger = staggerVal === '' || staggerVal == null ? 0 : parseFloat(staggerVal);
+    testConfig.hostStaggerOffset = isNaN(parsedStagger) ? 0 : Math.max(0, parsedStagger);
+    const randomEl = document.getElementById('hostRandomTiming');
+    testConfig.hostRandomTiming = randomEl ? randomEl.checked : false;
+    function parseNumField(id) {
+        const v = document.getElementById(id)?.value;
+        const n = v === '' || v == null ? 0 : parseFloat(v);
+        return isNaN(n) ? 0 : Math.max(0, n);
+    }
+    testConfig.hostPublishMax = parseNumField('hostPublishMax');
+    testConfig.hostRejoinMax = parseNumField('hostRejoinMax');
     const geoRegionsSelect = document.getElementById('geoRegions');
     if (geoRegionsSelect) {
         const selected = Array.from(geoRegionsSelect.selectedOptions).map(o => o.value);
@@ -119,10 +159,24 @@ function updateConfig() {
     if (useStringUidEl) {
         testConfig.useStringUid = useStringUidEl.checked;
     }
+    const publishAudioEl = document.getElementById('publishAudio');
+    if (publishAudioEl) {
+        testConfig.publishAudio = publishAudioEl.checked;
+    }
     const publishCameraEl = document.getElementById('publishCamera');
     if (publishCameraEl) {
         testConfig.publishCamera = publishCameraEl.checked;
     }
+}
+
+// Toggle random timing fields visibility
+function handleHostRandomToggle() {
+    const checked = document.getElementById('hostRandomTiming')?.checked;
+    const fields = document.getElementById('hostRandomFields');
+    if (fields) {
+        fields.style.display = checked ? 'block' : 'none';
+    }
+    updateConfig();
 }
 
 // Handle publish camera checkbox change
@@ -165,27 +219,26 @@ async function startTest() {
     updateStatus('Test Running', 'running');
     
     try {
-        // Basic validation and cap total clients at 20
         const totalRequested = (testConfig.hostsCount || 0) + (testConfig.audiencesCount || 0);
         if (totalRequested <= 0) {
             throw new Error('Please configure at least 1 client (host or audience)');
         }
-        
-        // Create and join clients for live broadcasting
+
+        testState.hostCycleAbort = new AbortController();
+
         await createAndJoinClientsLive();
         
-        // Create the audience table UI only if publishing camera (after clients are created)
         if (testConfig.publishCamera) {
             createAudienceTable();
-            // Trigger initial visibility check for cells that are already visible
             triggerInitialVisibilityCheck();
         }
         
-        // Start timer
         startTimer();
         
         const total = (testConfig.hostsCount || 0) + (testConfig.audiencesCount || 0);
-        log(`Test started with ${total} clients (hosts: ${testConfig.hostsCount}, audiences: ${testConfig.audiencesCount})`);
+        const hostCyclingEnabled = testConfig.hostPublishDuration > 0 || testConfig.hostRandomTiming;
+        const cycling = hostCyclingEnabled ? ' (hosts cycling)' : '';
+        log(`Test started with ${total} clients (hosts: ${testConfig.hostsCount}, audiences: ${testConfig.audiencesCount})${cycling}`);
     } catch (error) {
         log(`Error starting test: ${error.message}`);
         stopTest();
@@ -201,9 +254,17 @@ async function createAndJoinClientsLive() {
     let audienceRegionIndex = 0;
 
     // Create hosts
+    const hostCycling = testConfig.hostPublishDuration > 0 || testConfig.hostRandomTiming;
     for (let i = 0; i < (testConfig.hostsCount || 0); i++) {
         const clientInfo = await createHostClient(i, channel);
         testState.clients.push(clientInfo);
+        if (hostCycling) {
+            const staggerMs = (testConfig.hostStaggerOffset || 0) * 1000 * i;
+            const mode = testConfig.hostRandomTiming ? 'random' : 'fixed';
+            log(`Host ${i}: starting cycle loop (${mode}, stagger ${staggerMs}ms)`);
+            runHostCycleLoop(clientInfo, i, channel, testState.hostCycleAbort.signal, staggerMs)
+                .catch(e => log(`Host ${i}: cycle loop unhandled error: ${e.message}`));
+        }
     }
 
     // Create audiences
@@ -258,21 +319,23 @@ async function createHostClient(index, channelName) {
         
         let tracksToPublish = [];
         
-        if (testConfig.publishCamera) {
-            // Create and publish camera video track
-            const videoTrack = await AgoraRTC.createCameraVideoTrack();
-            tracksToPublish.push(videoTrack);
-            log(`Host ${client.uid} created camera video track`);
-        } else {
-            // Create and publish fake audio track
+        if (testConfig.publishAudio) {
             const audioTrack = await createSynthAudioTrack();
             tracksToPublish.push(audioTrack);
-            log(`Host ${client.uid} created fake audio track`);
         }
-        
-        await client.publish(tracksToPublish);
-        const mediaType = testConfig.publishCamera ? 'video' : 'audio';
-        log(`Host ${client.uid} joined channel ${channelName} and published ${mediaType}`);
+        if (testConfig.publishCamera) {
+            const videoTrack = await AgoraRTC.createCameraVideoTrack();
+            tracksToPublish.push(videoTrack);
+        }
+
+        if (tracksToPublish.length > 0) {
+            await client.publish(tracksToPublish);
+        }
+        const mediaTypes = [
+            testConfig.publishAudio ? 'audio' : null,
+            testConfig.publishCamera ? 'video' : null
+        ].filter(Boolean).join('+') || 'none';
+        log(`Host ${client.uid} joined channel ${channelName} and published ${mediaTypes}`);
         
         return { 
             client, 
@@ -331,7 +394,7 @@ async function createSynthAudioTrack() {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
-    gainNode.gain.value = 0.0001; // near silent
+    gainNode.gain.value = 0.3;
     oscillator.type = 'sine';
     oscillator.frequency.value = 440;
     oscillator.connect(gainNode);
@@ -339,6 +402,119 @@ async function createSynthAudioTrack() {
     gainNode.connect(dest);
     oscillator.start();
     return AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: dest.stream.getAudioTracks()[0] });
+}
+
+// Cancellable sleep that rejects when the signal is aborted
+function cancellableSleep(ms, signal) {
+    return new Promise((resolve, reject) => {
+        if (signal.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+        const timer = setTimeout(resolve, ms);
+        signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+    });
+}
+
+function getRandomInRange(min, max) {
+    return min + Math.random() * (max - min);
+}
+
+function getCyclePublishMs() {
+    const minS = testConfig.hostPublishDuration || 0;
+    if (testConfig.hostRandomTiming && testConfig.hostPublishMax > minS) {
+        return getRandomInRange(minS, testConfig.hostPublishMax) * 1000;
+    }
+    return minS * 1000;
+}
+
+function getCycleRejoinMs() {
+    const minS = testConfig.hostRejoinInterval || 0;
+    if (testConfig.hostRandomTiming && testConfig.hostRejoinMax > minS) {
+        return getRandomInRange(minS, testConfig.hostRejoinMax) * 1000;
+    }
+    return minS * 1000;
+}
+
+// Host cycling loop: join -> publish -> wait publishDuration -> leave -> wait rejoinInterval -> repeat
+async function runHostCycleLoop(clientInfo, hostIndex, channelName, signal, staggerMs) {
+    let cycleCount = 0;
+
+    try {
+        // Stagger: delay this host's first cycle
+        if (staggerMs > 0) {
+            log(`Host ${hostIndex}: stagger waiting ${staggerMs}ms before first cycle...`);
+            await cancellableSleep(staggerMs, signal);
+        }
+
+        // First cycle: already joined, just wait for the publish duration then leave
+        const firstPublishMs = getCyclePublishMs();
+        log(`Host ${hostIndex}: publishing for ${(firstPublishMs / 1000).toFixed(1)}s...`);
+        await cancellableSleep(firstPublishMs, signal);
+
+        while (!signal.aborted) {
+            // Leave
+            try {
+                if (clientInfo.localTracks) {
+                    for (const track of clientInfo.localTracks) {
+                        track.close();
+                    }
+                    clientInfo.localTracks = [];
+                }
+                await clientInfo.client.leave();
+                cycleCount++;
+                log(`Host ${hostIndex}: left channel (cycle ${cycleCount})`);
+            } catch (e) {
+                if (signal.aborted) break;
+                log(`Host ${hostIndex}: error leaving: ${e.message}`);
+            }
+
+            // Wait before rejoining
+            const rejoinMs = getCycleRejoinMs();
+            if (rejoinMs > 0) {
+                log(`Host ${hostIndex}: waiting ${(rejoinMs / 1000).toFixed(1)}s before rejoin...`);
+                await cancellableSleep(rejoinMs, signal);
+            }
+
+            if (signal.aborted) break;
+
+            // Rejoin and publish
+            try {
+                const uid = testConfig.useStringUid ? `string-${hostIndex}` : null;
+                await clientInfo.client.join(testConfig.appId, channelName, null, uid);
+                await clientInfo.client.setClientRole('host');
+                const tracks = [];
+                if (testConfig.publishAudio) {
+                    tracks.push(await createSynthAudioTrack());
+                }
+                if (testConfig.publishCamera) {
+                    tracks.push(await AgoraRTC.createCameraVideoTrack());
+                }
+                if (tracks.length > 0) {
+                    await clientInfo.client.publish(tracks);
+                }
+                clientInfo.localTracks = tracks;
+                clientInfo.uid = clientInfo.client.uid;
+                log(`Host ${clientInfo.client.uid}: rejoined and published (cycle ${cycleCount + 1})`);
+            } catch (e) {
+                if (signal.aborted) break;
+                log(`Host ${hostIndex}: error rejoining: ${e.message}`);
+                break;
+            }
+
+            // Stay connected for publishDuration
+            const publishMs = getCyclePublishMs();
+            log(`Host ${hostIndex}: publishing for ${(publishMs / 1000).toFixed(1)}s...`);
+            await cancellableSleep(publishMs, signal);
+        }
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            log(`Host ${hostIndex}: cycle loop aborted (test stopped)`);
+        } else {
+            log(`Host ${hostIndex}: cycle loop error: ${e.message}`);
+        }
+    }
+    log(`Host ${hostIndex}: cycle loop finished (${cycleCount} complete cycles)`);
 }
 
 // Setup event listeners for a specific client
@@ -712,6 +888,12 @@ async function stopTest() {
     
     log('Stopping test...');
     testState.isRunning = false;
+
+    // Abort host cycling loops
+    if (testState.hostCycleAbort) {
+        testState.hostCycleAbort.abort();
+        testState.hostCycleAbort = null;
+    }
     
     // Clear timer
     if (testState.testTimer) {
@@ -734,25 +916,20 @@ async function stopTest() {
     for (let i = 0; i < testState.clients.length; i++) {
         try {
             const clientInfo = testState.clients[i];
-            
-            // Close local tracks if they exist
             if (clientInfo.localTracks && Array.isArray(clientInfo.localTracks)) {
                 for (const track of clientInfo.localTracks) {
                     try {
                         track.close();
-                        log(`Client ${i}: Closed local track`);
                     } catch (trackError) {
-                        log(`Client ${i}: Error closing track: ${trackError.message}`);
+                        log(`Client ${clientInfo.index}: Error closing track: ${trackError.message}`);
                     }
                 }
             }
-            
             await clientInfo.client.leave();
-            log(`Client ${i} left channel ${clientInfo.channelName}`);
+            log(`Client ${clientInfo.index} left channel ${clientInfo.channelName}`);
             await clientInfo.client.removeAllListeners();
-            log(`Client ${i} removed all listeners`);
         } catch (error) {
-            log(`Error leaving client ${i}: ${error.message}`);
+            log(`Error leaving client ${clientInfo.index}: ${error.message}`);
         }
     }
     

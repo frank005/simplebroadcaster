@@ -159,6 +159,11 @@
             <div class="form-group">
                 <h4 style="margin-top: 20px; margin-bottom: 10px;">Pub/Sub Settings</h4>
                 <label>
+                    <input type="checkbox" id="publishAudio" checked style="width: auto; margin-right: 8px;">
+                    Publish Audio (synthetic tone)
+                </label>
+                <br>
+                <label>
                     <input type="checkbox" id="publishCamera" style="width: auto; margin-right: 8px;">
                     Publish Camera
                 </label>
@@ -180,6 +185,37 @@
                     <option value="interactive">Interactive Live Streaming (ultra-low)</option>
                     <option value="broadcast">Broadcast Streaming (low)</option>
                 </select>
+            </div>
+
+            <div class="form-group" style="border: 1px solid #ccc; padding: 12px; border-radius: 4px; background: #fff;">
+                <h4 style="margin-top: 0; margin-bottom: 10px;">Host Cycling</h4>
+                <small style="display:block; margin-bottom: 10px;">Leave publish duration empty to disable cycling (hosts stay entire test).</small>
+
+                <label for="hostPublishDuration">Publish Duration (seconds):</label>
+                <input type="number" id="hostPublishDuration" placeholder="e.g., 10 (empty = no cycling)" min="1" step="any">
+
+                <label for="hostRejoinInterval" style="margin-top: 8px;">Rejoin Interval (seconds):</label>
+                <input type="number" id="hostRejoinInterval" placeholder="e.g., 5" min="0" step="any">
+
+                <label for="hostStaggerOffset" style="margin-top: 8px;">Stagger Offset (seconds):</label>
+                <input type="number" id="hostStaggerOffset" placeholder="e.g., 2 (host N waits N * offset)" min="0" step="any">
+                <small>Each host's first cycle is delayed by index &times; offset. 0 = all start together.</small>
+
+                <div style="margin-top: 10px;">
+                    <label>
+                        <input type="checkbox" id="hostRandomTiming" style="width: auto; margin-right: 8px;">
+                        Randomize timing
+                    </label>
+                    <small style="display:block;">When checked, publish duration and rejoin interval are randomized between min/max each cycle.</small>
+                </div>
+
+                <div id="hostRandomFields" style="display: none; margin-top: 8px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
+                    <small style="display:block; margin-bottom: 6px;">Publish Duration and Rejoin Interval above are used as the <b>minimum</b>. Set the max below.</small>
+                    <label for="hostPublishMax">Publish Duration Max (s):</label>
+                    <input type="number" id="hostPublishMax" placeholder="e.g., 15" min="1" step="any">
+                    <label for="hostRejoinMax" style="margin-top: 4px;">Rejoin Interval Max (s):</label>
+                    <input type="number" id="hostRejoinMax" placeholder="e.g., 8" min="0" step="any">
+                </div>
             </div>
 
             <div class="form-group">
