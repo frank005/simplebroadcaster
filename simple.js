@@ -39,7 +39,8 @@ let testState = {
     timeRemaining: 0,
     hostCycleAbort: null,
     intersectionObserver: null,
-    audienceCells: []
+    audienceCells: [],
+    synthAudioContext: null // shared so every host's oscillator runs (per-host AudioContexts stay suspended after first await)
 };
 
 // Test configuration
@@ -270,6 +271,10 @@ async function startTest() {
 // Create and join multiple clients for live broadcasting
 async function createAndJoinClientsLive() {
     testState.clients = [];
+    // Resume shared AudioContext once while still in the user-gesture chain from Start Test
+    if (testConfig.publishAudio) {
+        await ensureSynthAudioContext();
+    }
     const channel = testConfig.channelName;
     const latencyLevel = testConfig.audienceType === 'interactive' ? 1 : 2;
     const audienceIntervalMs = (testConfig.audienceJoinInterval || 0) * 1000;
@@ -340,7 +345,7 @@ async function createHostClient(index, channelName) {
         let tracksToPublish = [];
         
         if (testConfig.publishAudio) {
-            const audioTrack = await createSynthAudioTrack();
+            const audioTrack = await createSynthAudioTrack(index);
             tracksToPublish.push(audioTrack);
         }
         if (testConfig.publishCamera) {
@@ -409,19 +414,42 @@ async function createAudienceClient(index, channelName, latencyLevel) {
     }
 }
 
+async function ensureSynthAudioContext() {
+    if (!testState.synthAudioContext) {
+        testState.synthAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (testState.synthAudioContext.state === 'suspended') {
+        await testState.synthAudioContext.resume();
+        log('Synth AudioContext resumed (shared by all hosts)');
+    }
+    return testState.synthAudioContext;
+}
+
 // Create a synthesized audio track so hosts can publish without mic permissions
-async function createSynthAudioTrack() {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+async function createSynthAudioTrack(hostIndex = 0) {
+    const audioContext = await ensureSynthAudioContext();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
-    gainNode.gain.value = 0.3;
+    gainNode.gain.value = 0.15;
     oscillator.type = 'sine';
-    oscillator.frequency.value = 440;
+    oscillator.frequency.value = 440 + (hostIndex % 24) * 20;
     oscillator.connect(gainNode);
     const dest = audioContext.createMediaStreamDestination();
     gainNode.connect(dest);
     oscillator.start();
-    return AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: dest.stream.getAudioTracks()[0] });
+    const track = await AgoraRTC.createCustomAudioTrack({ mediaStreamTrack: dest.stream.getAudioTracks()[0] });
+    const origClose = track.close.bind(track);
+    track.close = function () {
+        try {
+            oscillator.stop();
+        } catch (e) { /* already stopped */ }
+        try {
+            oscillator.disconnect();
+            gainNode.disconnect();
+        } catch (e) { /* ignore */ }
+        return origClose();
+    };
+    return track;
 }
 
 // Cancellable sleep that rejects when the signal is aborted
@@ -505,7 +533,7 @@ async function runHostCycleLoop(clientInfo, hostIndex, channelName, signal, stag
                 await clientInfo.client.setClientRole('host');
                 const tracks = [];
                 if (testConfig.publishAudio) {
-                    tracks.push(await createSynthAudioTrack());
+                    tracks.push(await createSynthAudioTrack(hostIndex));
                 }
                 if (testConfig.publishCamera) {
                     tracks.push(await AgoraRTC.createCameraVideoTrack());
@@ -968,6 +996,16 @@ async function stopTest() {
     
     // Clear clients array
     testState.clients = [];
+
+    if (testState.synthAudioContext) {
+        try {
+            await testState.synthAudioContext.close();
+            log('Synth AudioContext closed');
+        } catch (e) {
+            log(`Synth AudioContext close: ${e.message}`);
+        }
+        testState.synthAudioContext = null;
+    }
 
     //reset PeerConnection counter
     pcCounter = 0;
