@@ -58,10 +58,16 @@ let testConfig = {
     hostPublishMax: 0, // max publish duration (min = hostPublishDuration)
     hostRejoinMax: 0, // max rejoin interval (min = hostRejoinInterval)
     geoRegions: [], // array of area codes to round-robin for audiences
-    useStringUid: false, // if true, use string UID "string" instead of null (auto-assigned integers)
+    useStringUid: false, // if true, use string UID based on account name
+    stringUidPrefix: '', // account name prefix for string UIDs
     publishAudio: true, // if true, publish synthetic audio track
     publishCamera: false // if true, publish camera video track
 };
+
+function getStringUid(index) {
+    const prefix = testConfig.stringUidPrefix || 'user';
+    return `${prefix}-${index}`;
+}
 
 // Utility: sleep for given milliseconds
 function sleep(ms) {
@@ -113,7 +119,9 @@ function setupButtonHandlers() {
     const geoRegionsEl = document.getElementById('geoRegions');
     if (geoRegionsEl) geoRegionsEl.onchange = updateConfig;
     const useStringUidEl = document.getElementById('useStringUid');
-    if (useStringUidEl) useStringUidEl.onchange = updateConfig;
+    if (useStringUidEl) useStringUidEl.onchange = handleStringUidToggle;
+    const stringUidPrefixEl = document.getElementById('stringUidPrefix');
+    if (stringUidPrefixEl) stringUidPrefixEl.onchange = updateConfig;
     const publishAudioEl = document.getElementById('publishAudio');
     if (publishAudioEl) publishAudioEl.onchange = updateConfig;
     const publishCameraEl = document.getElementById('publishCamera');
@@ -159,6 +167,10 @@ function updateConfig() {
     if (useStringUidEl) {
         testConfig.useStringUid = useStringUidEl.checked;
     }
+    const stringUidPrefixEl = document.getElementById('stringUidPrefix');
+    if (stringUidPrefixEl) {
+        testConfig.stringUidPrefix = stringUidPrefixEl.value.trim();
+    }
     const publishAudioEl = document.getElementById('publishAudio');
     if (publishAudioEl) {
         testConfig.publishAudio = publishAudioEl.checked;
@@ -167,6 +179,16 @@ function updateConfig() {
     if (publishCameraEl) {
         testConfig.publishCamera = publishCameraEl.checked;
     }
+}
+
+// Toggle string UID fields visibility
+function handleStringUidToggle() {
+    const checked = document.getElementById('useStringUid')?.checked;
+    const fields = document.getElementById('stringUidFields');
+    if (fields) {
+        fields.style.display = checked ? 'block' : 'none';
+    }
+    updateConfig();
 }
 
 // Toggle random timing fields visibility
@@ -311,9 +333,7 @@ async function createHostClient(index, channelName) {
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
     setupClientEventListeners(client, `host-${index}`);
     try {
-        // Use string UID "string" with index suffix if enabled, otherwise null (auto-assigned integer)
-        // Each client needs a unique UID, so we append the index
-        const uid = testConfig.useStringUid ? `string-${index}` : null;
+        const uid = testConfig.useStringUid ? getStringUid(index) : null;
         await client.join(testConfig.appId, channelName, null, uid);
         await client.setClientRole('host');
         
@@ -356,7 +376,7 @@ async function createAudienceClient(index, channelName, latencyLevel) {
     setupClientEventListeners(client, `aud-${index}`);
     try {
         const hostsCount = testConfig.hostsCount || 0;
-        const uid = testConfig.useStringUid ? `string-${hostsCount + index}` : null;
+        const uid = testConfig.useStringUid ? getStringUid(hostsCount + index) : null;
         
         const clientInfo = {
             client,
@@ -480,7 +500,7 @@ async function runHostCycleLoop(clientInfo, hostIndex, channelName, signal, stag
 
             // Rejoin and publish
             try {
-                const uid = testConfig.useStringUid ? `string-${hostIndex}` : null;
+                const uid = testConfig.useStringUid ? getStringUid(hostIndex) : null;
                 await clientInfo.client.join(testConfig.appId, channelName, null, uid);
                 await clientInfo.client.setClientRole('host');
                 const tracks = [];

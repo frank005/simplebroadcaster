@@ -251,8 +251,13 @@
             <div class="form-group">
                 <label>
                     <input type="checkbox" id="useStringUid" style="width: auto; margin-right: 8px;">
-                    Use string UID (sends string-int++ instead of auto-assigned integers)
+                    Use string UID (account name instead of auto-assigned integers)
                 </label>
+                <div id="stringUidFields" style="display: none; margin-top: 6px;">
+                    <label for="stringUidPrefix">Account Name:</label>
+                    <input type="text" id="stringUidPrefix" placeholder="e.g., frank" value="">
+                    <small>UIDs will be: name-0, name-1, name-2, etc.</small>
+                </div>
             </div>
             
             
