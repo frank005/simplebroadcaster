@@ -2,6 +2,37 @@
 AgoraRTC.setParameter("SHOW_GLOBAL_CLIENT_LIST", true);
 AgoraRTC.setLogLevel(4);
 
+const THEME_STORAGE_KEY = 'simplebroadcaster-theme';
+
+function getTheme() {
+    const t = document.documentElement.getAttribute('data-theme');
+    return t === 'light' ? 'light' : 'dark';
+}
+
+function setTheme(theme) {
+    const next = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try {
+        localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch (e) {
+        /* ignore quota / private mode */
+    }
+    updateThemeToggleUI();
+}
+
+function updateThemeToggleUI() {
+    const btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    const isDark = getTheme() === 'dark';
+    btn.textContent = isDark ? 'Light' : 'Dark';
+    btn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+    btn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+}
+
+function toggleTheme() {
+    setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+}
+
 
 //overide the RTCPeerConnection to count the number of PeerConnections created
 let pcCounter = 0;
@@ -78,6 +109,11 @@ function sleep(ms) {
 // Initialize the testing client
 function initializeTestingClient() {
     log('Testing client initialized');
+    updateThemeToggleUI();
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        themeToggle.onclick = toggleTheme;
+    }
     setupEventListeners();
     setupButtonHandlers();
     updateUI();

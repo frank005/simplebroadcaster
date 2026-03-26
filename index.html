@@ -3,44 +3,222 @@
 <head>
     <meta charset="UTF-8" />
     <title>Web SDK Testing Client</title>
+    <script>
+        (function () {
+            var STORAGE_KEY = 'simplebroadcaster-theme';
+            var stored = localStorage.getItem(STORAGE_KEY);
+            var theme = stored === 'light' || stored === 'dark' ? stored : 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
     <style>
+        :root {
+            color-scheme: light;
+            --color-bg-page: #f5f5f5;
+            --color-bg-surface: #ffffff;
+            --color-bg-section: #f9f9f9;
+            --color-bg-input: #ffffff;
+            --color-border: #dddddd;
+            --color-border-strong: #cccccc;
+            --color-border-input: #cccccc;
+            --color-text: #212529;
+            --color-text-muted: #6c757d;
+            --color-primary: #007bff;
+            --color-primary-hover: #0056b3;
+            --color-btn-disabled: #6c757d;
+            --color-status-running-bg: #d4edda;
+            --color-status-running-text: #155724;
+            --color-status-running-border: #c3e6cb;
+            --color-status-stopped-bg: #f8d7da;
+            --color-status-stopped-text: #721c24;
+            --color-status-stopped-border: #f5c6cb;
+            --color-log-bg: #f8f9fa;
+            --color-log-text: #212529;
+            --color-log-border: #dee2e6;
+            --color-video-border: #007bff;
+            --color-timer: #007bff;
+            --color-video-container-bg: #f8f9fa;
+            --color-video-container-border: #dddddd;
+            --color-shadow: rgba(0, 0, 0, 0.1);
+            --color-host-box-bg: #ffffff;
+            --color-random-fields-bg: #f0f0f0;
+            --color-audience-border: #000000;
+            --color-audience-full: #28a745;
+            --color-audience-partial: #fd7e14;
+            --color-audience-none: #dc3545;
+        }
+
+        [data-theme="dark"] {
+            color-scheme: dark;
+            --color-bg-page: #121212;
+            --color-bg-surface: #1e1e1e;
+            --color-bg-section: #2a2a2a;
+            --color-bg-input: #2d2d2d;
+            --color-border: #444444;
+            --color-border-strong: #555555;
+            --color-border-input: #555555;
+            --color-text: #e9ecef;
+            --color-text-muted: #adb5bd;
+            --color-primary: #4dabf7;
+            --color-primary-hover: #339af0;
+            --color-btn-disabled: #5c636a;
+            --color-status-running-bg: #1b4332;
+            --color-status-running-text: #8ce99a;
+            --color-status-running-border: #2b8a3e;
+            --color-status-stopped-bg: #491c1c;
+            --color-status-stopped-text: #ffa8a8;
+            --color-status-stopped-border: #c92a2a;
+            --color-log-bg: #0d1117;
+            --color-log-text: #c9d1d9;
+            --color-log-border: #30363d;
+            --color-video-border: #4dabf7;
+            --color-timer: #4dabf7;
+            --color-video-container-bg: #161b22;
+            --color-video-container-border: #444444;
+            --color-shadow: rgba(0, 0, 0, 0.45);
+            --color-host-box-bg: #252525;
+            --color-random-fields-bg: #333333;
+            --color-audience-border: #888888;
+            --color-audience-full: #2f9e44;
+            --color-audience-partial: #fd7e14;
+            --color-audience-none: #e03131;
+        }
+
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
-            background-color: #f5f5f5;
+            background-color: var(--color-bg-page);
+            color: var(--color-text);
         }
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            background-color: white;
+            background-color: var(--color-bg-surface);
             padding: 20px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px var(--color-shadow);
+        }
+        .page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .page-title {
+            margin: 0;
+            flex: 1;
+            min-width: 0;
+        }
+        .theme-toggle {
+            flex-shrink: 0;
+            background-color: var(--color-bg-section);
+            color: var(--color-text);
+            border: 1px solid var(--color-border);
+            padding: 8px 14px;
+            margin: 0;
+        }
+        .theme-toggle:hover {
+            background-color: var(--color-bg-page);
+            border-color: var(--color-border-strong);
+        }
+        [data-theme="dark"] .theme-toggle:hover {
+            background-color: var(--color-bg-section);
         }
         .form-section {
             margin-bottom: 20px;
             padding: 15px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--color-border);
             border-radius: 5px;
-            background-color: #f9f9f9;
+            background-color: var(--color-bg-section);
+        }
+        .form-section h3,
+        .form-section h4 {
+            color: var(--color-text);
         }
         .form-group {
             margin-bottom: 15px;
+        }
+        .subsection-heading {
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .subsection-heading.tight-top {
+            margin-top: 0;
         }
         label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
+            color: var(--color-text);
         }
-        input, select {
+        .checkbox-label {
+            display: block;
+            font-weight: normal;
+        }
+        .checkbox-inline {
+            width: auto;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        .block-margin-bottom {
+            display: block;
+            margin-bottom: 10px;
+        }
+        .block-margin-bottom-sm {
+            display: block;
+            margin-bottom: 6px;
+        }
+        .block-margin-top {
+            display: block;
+        }
+        .margin-top-sm {
+            margin-top: 10px;
+        }
+        .label-spaced {
+            margin-top: 8px;
+        }
+        .label-tight-top {
+            margin-top: 4px;
+        }
+        .string-uid-fields {
+            display: none;
+            margin-top: 6px;
+        }
+        input[type="text"],
+        input[type="number"],
+        select {
             width: 100%;
             padding: 8px;
-            border: 1px solid #ccc;
+            border: 1px solid var(--color-border-input);
             border-radius: 4px;
             box-sizing: border-box;
+            background-color: var(--color-bg-input);
+            color: var(--color-text);
+        }
+        select[multiple] {
+            min-height: 8em;
+        }
+        .host-cycling-box {
+            border: 1px solid var(--color-border-strong);
+            padding: 12px;
+            border-radius: 4px;
+            background: var(--color-host-box-bg);
+        }
+        .host-random-fields {
+            display: none;
+            margin-top: 8px;
+            padding: 8px;
+            background: var(--color-random-fields-bg);
+            border-radius: 4px;
+            border: 1px solid var(--color-border);
+        }
+        small {
+            color: var(--color-text-muted);
         }
         button {
-            background-color: #007bff;
+            background-color: var(--color-primary);
             color: white;
             padding: 10px 20px;
             border: none;
@@ -50,10 +228,10 @@
             margin-bottom: 10px;
         }
         button:hover {
-            background-color: #0056b3;
+            background-color: var(--color-primary-hover);
         }
         button:disabled {
-            background-color: #6c757d;
+            background-color: var(--color-btn-disabled);
             cursor: not-allowed;
         }
         .status {
@@ -62,18 +240,19 @@
             border-radius: 4px;
         }
         .status.running {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background-color: var(--color-status-running-bg);
+            color: var(--color-status-running-text);
+            border: 1px solid var(--color-status-running-border);
         }
         .status.stopped {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background-color: var(--color-status-stopped-bg);
+            color: var(--color-status-stopped-text);
+            border: 1px solid var(--color-status-stopped-border);
         }
         #log {
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
+            background-color: var(--color-log-bg);
+            color: var(--color-log-text);
+            border: 1px solid var(--color-log-border);
             border-radius: 4px;
             padding: 10px;
             max-height: 300px;
@@ -88,14 +267,14 @@
             margin: 10px 0;
         }
         .video-player {
-            border: 2px solid #007bff;
+            border: 2px solid var(--color-video-border);
             border-radius: 4px;
-            background-color: #000;
+            background-color: #000000;
         }
         .timer {
             font-size: 18px;
             font-weight: bold;
-            color: #007bff;
+            color: var(--color-timer);
             margin: 10px 0;
             padding: 10px;
             display: none; /* Hidden by default, shown when timer starts */
@@ -104,9 +283,9 @@
             max-height: 440px; /* 2 rows * 200px + gaps + padding */
             overflow-y: auto;
             overflow-x: hidden;
-            border: 2px solid #ddd;
+            border: 2px solid var(--color-video-container-border);
             padding: 10px;
-            background-color: #f8f9fa;
+            background-color: var(--color-video-container-bg);
         }
         .audience-table {
             display: grid;
@@ -117,7 +296,7 @@
         .audience-cell {
             width: 200px;
             height: 200px;
-            border: 3px solid #000;
+            border: 3px solid var(--color-audience-border);
             border-radius: 8px;
             display: flex;
             align-items: center;
@@ -125,23 +304,26 @@
             font-weight: bold;
             font-size: 14px;
             color: white;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
             transition: background-color 0.3s ease;
         }
         .audience-cell.visible-full {
-            background-color: #28a745; /* Green - fully visible */
+            background-color: var(--color-audience-full);
         }
         .audience-cell.visible-partial {
-            background-color: #fd7e14; /* Orange - partially visible */
+            background-color: var(--color-audience-partial);
         }
         .audience-cell.visible-none {
-            background-color: #dc3545; /* Red - not visible */
+            background-color: var(--color-audience-none);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>Web SDK Broadcasting Tester</h2>
+        <header class="page-header">
+            <h2 class="page-title">Web SDK Broadcasting Tester</h2>
+            <button type="button" id="themeToggle" class="theme-toggle" aria-label="Switch color theme"></button>
+        </header>
         
         <div class="form-section">
             <h3>Test Configuration</h3>
@@ -157,14 +339,14 @@
             </div>
 
             <div class="form-group">
-                <h4 style="margin-top: 20px; margin-bottom: 10px;">Pub/Sub Settings</h4>
-                <label>
-                    <input type="checkbox" id="publishAudio" checked style="width: auto; margin-right: 8px;">
+                <h4 class="subsection-heading">Pub/Sub Settings</h4>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="publishAudio" checked class="checkbox-inline">
                     Publish Audio (synthetic tone)
                 </label>
                 <br>
-                <label>
-                    <input type="checkbox" id="publishCamera" style="width: auto; margin-right: 8px;">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="publishCamera" class="checkbox-inline">
                     Publish Camera
                 </label>
             </div>
@@ -187,33 +369,33 @@
                 </select>
             </div>
 
-            <div class="form-group" style="border: 1px solid #ccc; padding: 12px; border-radius: 4px; background: #fff;">
-                <h4 style="margin-top: 0; margin-bottom: 10px;">Host Cycling</h4>
-                <small style="display:block; margin-bottom: 10px;">Leave publish duration empty to disable cycling (hosts stay entire test).</small>
+            <div class="form-group host-cycling-box">
+                <h4 class="subsection-heading tight-top">Host Cycling</h4>
+                <small class="block-margin-bottom">Leave publish duration empty to disable cycling (hosts stay entire test).</small>
 
                 <label for="hostPublishDuration">Publish Duration (seconds):</label>
                 <input type="number" id="hostPublishDuration" placeholder="e.g., 10 (empty = no cycling)" min="1" step="any">
 
-                <label for="hostRejoinInterval" style="margin-top: 8px;">Rejoin Interval (seconds):</label>
+                <label for="hostRejoinInterval" class="label-spaced">Rejoin Interval (seconds):</label>
                 <input type="number" id="hostRejoinInterval" placeholder="e.g., 5" min="0" step="any">
 
-                <label for="hostStaggerOffset" style="margin-top: 8px;">Stagger Offset (seconds):</label>
+                <label for="hostStaggerOffset" class="label-spaced">Stagger Offset (seconds):</label>
                 <input type="number" id="hostStaggerOffset" placeholder="e.g., 2 (host N waits N * offset)" min="0" step="any">
                 <small>Each host's first cycle is delayed by index &times; offset. 0 = all start together.</small>
 
-                <div style="margin-top: 10px;">
-                    <label>
-                        <input type="checkbox" id="hostRandomTiming" style="width: auto; margin-right: 8px;">
+                <div class="margin-top-sm">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="hostRandomTiming" class="checkbox-inline">
                         Randomize timing
                     </label>
-                    <small style="display:block;">When checked, publish duration and rejoin interval are randomized between min/max each cycle.</small>
+                    <small class="block-margin-top">When checked, publish duration and rejoin interval are randomized between min/max each cycle.</small>
                 </div>
 
-                <div id="hostRandomFields" style="display: none; margin-top: 8px; padding: 8px; background: #f0f0f0; border-radius: 4px;">
-                    <small style="display:block; margin-bottom: 6px;">Publish Duration and Rejoin Interval above are used as the <b>minimum</b>. Set the max below.</small>
+                <div id="hostRandomFields" class="host-random-fields">
+                    <small class="block-margin-bottom-sm">Publish Duration and Rejoin Interval above are used as the <b>minimum</b>. Set the max below.</small>
                     <label for="hostPublishMax">Publish Duration Max (s):</label>
                     <input type="number" id="hostPublishMax" placeholder="e.g., 15" min="1" step="any">
-                    <label for="hostRejoinMax" style="margin-top: 4px;">Rejoin Interval Max (s):</label>
+                    <label for="hostRejoinMax" class="label-tight-top">Rejoin Interval Max (s):</label>
                     <input type="number" id="hostRejoinMax" placeholder="e.g., 8" min="0" step="any">
                 </div>
             </div>
@@ -249,11 +431,11 @@
             </div>
             
             <div class="form-group">
-                <label>
-                    <input type="checkbox" id="useStringUid" style="width: auto; margin-right: 8px;">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="useStringUid" class="checkbox-inline">
                     Use string UID (account name instead of auto-assigned integers)
                 </label>
-                <div id="stringUidFields" style="display: none; margin-top: 6px;">
+                <div id="stringUidFields" class="string-uid-fields">
                     <label for="stringUidPrefix">Account Name:</label>
                     <input type="text" id="stringUidPrefix" placeholder="e.g., frank" value="">
                     <small>UIDs will be: name-0, name-1, name-2, etc.</small>
